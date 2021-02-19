@@ -1,0 +1,132 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+
+# (c) 2020 Simon Biewald
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+set -e
+
+###############################################################################
+
+stop() {
+  echo "Removing $IFF."
+  ip link set down dev "$IFF"
+  ip link delete dev "$IFF"
+}
+
+start() {
+  echo "Creating $IFF."
+  ip link add dev "$IFF" type wireguard
+  if [ -n "$IP4" ]; then
+    ip address add dev "$IFF" "$IP4"
+  fi
+  if [ -n "$IP6" ]; then
+    ip address add dev "$IFF" "$IP6"
+  fi
+  wg setconf "$IFF" "$CONF"
+  ip link set up dev "$IFF"
+  wg show "$IFF"
+}
+
+status() {
+  wg show "$IFF"
+}
+
+
+help() {
+  echo "$0 start|stop|restart"
+}
+
+usage() {
+  echo "wg-syv - SysV script for WireGuard VPNs.
+(c) 2020 Simon Biewald
+
+WireGuard is a registered trademark of Jason A. Donenfeld.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+
+Usage:
+        Create a symlink to this binary in youzr init directory (e.g. /etc
+        /init.d) with the same name as of your Wireguard interface name.
+
+        If you use systemd, remember to call systemctl reload-daemon after
+        creating the symlink.
+
+Example:
+        Write your wireguard configuration file into /etc/wireguard/wg0.conf.
+
+        # ln /etc/init.d/wg0
+        # echo 'IP4=10.111.0.1/24' > /etc/default/wg0
+        # echo 'IP6=fd:1337::1/64' >> /etc/default/wg0
+        # /etc/init.d/wg0 start
+"
+}
+
+###############################################################################
+
+IFF=`echo $0 | grep -o '[^/]*$'`
+DEFAULTS="/etc/default/$IFF"
+CONF="/etc/wireguard/$IFF.conf"
+
+IP4=
+IP6=
+
+###############################################################################
+
+
+if [ $IFF = "wg-sysv" ]; then
+  usage; exit 1
+fi
+
+if [ $# -ne 1 ]; then
+  help; exit 1
+fi
+
+
+if [ -f "$DEFAULTS" ] || [ -h "$DEFAULTS" ]; then
+  # The IPv4/6 regexes do match invalid addresses (I know that)
+  # IPv6 addresses can be horribly complex...
+  IP4=`egrep -o "^IP4=[\"']?.*[\"']?" "$DEFAULTS" | egrep -o '[0-9]{1,3}(\.[0-9]{1,3}){1,3}/[0-9]{1,2}'` || true
+  IP6=`egrep -o "^IP6=[\"']?.*[\"']?" "$DEFAULTS" | egrep -o '(:?:?[0-9a-f]{1,4}){0,8}/[0-9]{1,3}'` || true
+else
+  echo "No ip address configuration found at $DEFAULTS"
+  exit 1
+fi
+
+if [ -z "$IP4" ] && [ -z "$IP6" ]; then
+  echo "No valid IPv4 or IPv6 address configured."
+  exit 1
+fi
+
+case "$1" in
+  start)
+    start;;
+  stop)
+    stop;;
+  restart|reload|force-reload)
+    stop
+    start
+    ;;
+  *)
+    help; exit 1;;
+esac
